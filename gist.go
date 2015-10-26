@@ -8,8 +8,11 @@
 package main
 
 import (
+	"crypto/sha1"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,8 +32,23 @@ func main() {
 	switch arg {
 	case "list":
 		list()
+	case "cat":
+		if len(os.Args) != 3 {
+			usage()
+		}
+		cat(os.Args[2])
 	case "dump-files", "dump":
 		dumpToFiles()
+	case "create-private":
+		if len(os.Args) != 3 {
+			usage()
+		}
+		create(os.Args[2], false)
+	case "create-public":
+		if len(os.Args) != 3 {
+			usage()
+		}
+		create(os.Args[2], true)
 	case "grep":
 		if len(os.Args) < 3 {
 			usage()
@@ -49,6 +67,9 @@ The commands are:
 
 	list
 	dump-files
+	create-private [<filename>|[-]]
+	create-public [<filename>|[-]]
+	cat <id>
 	grep <pattern>
 
 `
@@ -93,6 +114,25 @@ func list() {
 		}
 
 		opts.Page = resp.NextPage
+	}
+}
+
+func cat(id string) {
+	ts := oauth2.StaticTokenSource(
+		&oauth2.Token{AccessToken: token()},
+	)
+	tc := oauth2.NewClient(oauth2.NoContext, ts)
+
+	client := github.NewClient(tc)
+
+	gist, _, err := client.Gists.Get(id)
+	if err != nil {
+		panic(err)
+	}
+	for _, gf := range gist.Files {
+		if gf.Content != nil {
+			fmt.Println(*gf.Content)
+		}
 	}
 }
 
@@ -226,4 +266,55 @@ func token() string {
 		panic("No gist.token configured in gitconfig")
 	}
 	return string(out)
+}
+
+func create(filename string, public bool) {
+	ts := oauth2.StaticTokenSource(
+		&oauth2.Token{AccessToken: token()},
+	)
+	tc := oauth2.NewClient(oauth2.NoContext, ts)
+
+	client := github.NewClient(tc)
+
+	var r io.Reader
+	if filename == "-" {
+		r = os.Stdin
+	} else {
+		f, err := os.Open(filename)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer f.Close()
+		r = f
+	}
+
+	content, err := ioutil.ReadAll(r)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var strBody = string(content)
+
+	gistFilename := filepath.Base(filename)
+	if filename == "-" {
+		h := sha1.New()
+		h.Write(content)
+		h.Sum(nil)
+		gistFilename = fmt.Sprintf("%x", sha1.Sum(nil))
+	}
+
+	g := github.Gist{
+		Files: map[github.GistFilename]github.GistFile{
+			github.GistFilename(gistFilename): github.GistFile{
+				Content: &strBody,
+			},
+		},
+		Public: &public,
+	}
+
+	created, _, err := client.Gists.Create(&g)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Gist: ", *created.HTMLURL)
 }
