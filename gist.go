@@ -260,7 +260,7 @@ func token() string {
 	if out == nil {
 		panic("No gist.token configured in gitconfig")
 	}
-	return string(out)
+	return strings.TrimSpace(string(out))
 }
 
 func create(filename string, public bool) {
