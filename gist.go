@@ -98,7 +98,7 @@ func list() {
 			}
 			fmt.Printf("%s %s %s\n", g.CreatedAt.Format("2006-02-01"), *g.ID, desc)
 			var files []string
-			for name, _ := range g.Files {
+			for name := range g.Files {
 				files = append(files, string(name))
 			}
 			fmt.Println("  ", strings.Join(files, ","))
@@ -226,10 +226,21 @@ func grep(match string) {
 		for _, g := range gists {
 			wg.Add(1)
 			go func(g github.Gist) {
+				defer wg.Done()
+
 				gist, _, err := client.Gists.Get(*g.ID)
 				if err != nil {
 					panic(err)
 				}
+
+				if gist.Description != nil {
+					descr := strings.ToUpper(*gist.Description)
+					if strings.Contains(descr, upMatch) {
+						results <- gist
+						return
+					}
+				}
+
 			OUTER:
 				for _, gf := range gist.Files {
 					if gf.Content != nil {
@@ -239,8 +250,14 @@ func grep(match string) {
 							break OUTER
 						}
 					}
+					if gf.Filename != nil {
+						fn := strings.ToUpper(*gf.Filename)
+						if strings.Contains(fn, upMatch) {
+							results <- gist
+							break OUTER
+						}
+					}
 				}
-				wg.Done()
 			}(g)
 		}
 
@@ -299,7 +316,7 @@ func create(filename string, public bool) {
 
 	g := github.Gist{
 		Files: map[github.GistFilename]github.GistFile{
-			github.GistFilename(gistFilename): github.GistFile{
+			github.GistFilename(gistFilename): {
 				Content: &strBody,
 			},
 		},
